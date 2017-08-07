@@ -32,12 +32,13 @@
 /** BEGIN: Low-Level I/O Implementation **/
 struct ftdi_context ftdic;
 
+#if 0
 #define USB_TMS                 0x80  // 7
 #define USB_TDO                 0x40  // 6
 #define USB_TCK                 0x20  // 5
 #define USB_TDI                 0x08  // 3
+#endif
 
-#if 1
 struct io_layout
 {
         uint8_t unused012:3; // bits 0,1,2 unused
@@ -47,17 +48,6 @@ struct io_layout
 	uint8_t tdo:1; // bit 6, 0x40
 	uint8_t tms:1; // bit 7, 0x80
 };
-#else
-struct io_layout
-{
-	unsigned char tms:1; // bit 7
-	unsigned char tdo:1; // bit 6
-	unsigned char tck:1; // bit 5
-        unsigned char unused4:1; // bit 4 unused
-	unsigned char tdi:1; // bit 3
-        unsigned char unused012:3; // bits 0,1,2 unused
-};
-#endif
 
 static volatile struct io_layout *o_direction;
 static volatile struct io_layout *o_data;
@@ -89,27 +79,21 @@ static void io_setup(void)
   o_direction->tdo = 0; // input
   o_direction->tdi = 1;
 
-  printf("%02x %02x\n", *(unsigned char *)o_direction, USB_TMS|USB_TDI|USB_TCK);
-
   ftdi_set_baudrate(&ftdic, 1000000); /* Actually n * 16 */
 
   ftdi_write_data_set_chunksize(&ftdic, BUFLEN_MAX);
-  ftdi_set_latency_timer(&ftdic, 1);
+  ftdi_set_latency_timer(&ftdic, 0);
 
   /* Initialize, open device, set bitbang mode w/5 outputs */
   ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_SYNCBB);
 
-
   o_data = o_direction;
-  o_data->tms = 0;
-  o_data->tck = 0;
-  o_data->tdi = 0;
+  o_data->tms = 1;
+  o_data->tck = 1;
+  o_data->tdi = 1;
   ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-  for(int i = 0; i < 3; i++)
-  {
-    int res = ftdi_read_data(&ftdic, (unsigned char *)i_data, BUFLEN_MAX);
-    printf("%d, %02x\n", res, (*(unsigned char *)i_data) & USB_TDO);
-  }
+  for(int i = 0; i < 4; i++)
+	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 }
 
 static void io_shutdown(void)
@@ -119,15 +103,11 @@ static void io_shutdown(void)
 static void io_tms(int val)
 {
 	o_data->tms = val;
-	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 }
 
 static void io_tdi(int val)
 {
 	o_data->tdi = val;
-	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 }
 
 static void io_tck(int val)
@@ -147,7 +127,6 @@ static void io_trst(int val)
 
 static int io_tdo()
 {
-	// ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 	return i_data->tdo;
 }
 
