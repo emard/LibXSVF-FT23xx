@@ -19,6 +19,7 @@
  */
 
 #include "libxsvf.h"
+#include <stdio.h>
 
 static int read_command(struct libxsvf_host *h, char **buffer_p, int *len_p)
 {
@@ -343,6 +344,8 @@ int libxsvf_svf(struct libxsvf_host *h)
 	int state_run = LIBXSVF_TAP_IDLE;
 	int state_endrun = LIBXSVF_TAP_IDLE;
 
+        int cmd_count = 0;
+        char cmd_reportstring[256];
 	while (1)
 	{
 		rc = read_command(h, &command_buffer, &command_buffer_len);
@@ -350,6 +353,15 @@ int libxsvf_svf(struct libxsvf_host *h)
 		if (rc <= 0)
 			break;
 
+		cmd_count++;
+		#if 0
+		if((cmd_count % 1000) == 0)
+		{
+			// print progress every 1000 commands
+			// sprintf(cmd_reportstring, "%d commands", cmd_count);
+			LIBXSVF_HOST_REPORT_ERROR(cmd_reportstring);
+		}
+		#endif
 		const char *p = command_buffer;
 
 		LIBXSVF_HOST_REPORT_STATUS(command_buffer);
@@ -442,6 +454,7 @@ int libxsvf_svf(struct libxsvf_host *h)
 			int min_time = -1;
 			int max_time = -1;
 			while (*p) {
+			        // printf("parsing p=\"%s\"\n", p);
 				int got_maximum = 0;
 				if (!strtokencmp(p, "MAXIMUM")) {
 					p += strtokenskip(p);
@@ -469,6 +482,13 @@ int libxsvf_svf(struct libxsvf_host *h)
 				while (*p >= '0' && *p <= '9') {
 					number = number*10 + (*p - '0');
 					p++;
+				}
+				if(*p == '.')
+				{
+					p++;
+					while (*p >= '0' && *p <= '9')
+						p++;
+					// FIXME: accept fractional part
 				}
 				if(*p == 'E' || *p == 'e') {
 					p++;
@@ -640,7 +660,8 @@ eol_check:
 			continue;
 
 syntax_error:
-		LIBXSVF_HOST_REPORT_ERROR("SVF Syntax Error:");
+		sprintf(cmd_reportstring, "Command %d: SVF Syntax Error:", cmd_count);
+		LIBXSVF_HOST_REPORT_ERROR(cmd_reportstring);
 		if (0) {
 unsupported_error:
 			LIBXSVF_HOST_REPORT_ERROR("Error in SVF input: unsupported command:");
