@@ -101,7 +101,7 @@ static void io_setup(void)
   o_data->tck = 1;
   o_data->tdi = 1;
   ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-  for(int i = 0; i < 4; i++)
+  for(int i = 0; i < 10; i++)
 	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 }
 
