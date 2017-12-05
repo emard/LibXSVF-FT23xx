@@ -78,16 +78,16 @@ xsvftool-ft232h: LDFLAGS+=-pthread
 xsvftool-ft232h.o: CFLAGS+=-pthread
 xsvftool-ft232h: libxsvf.a xsvftool-ft232h.o
 
-xsvftool-ft232r: LDLIBS+=-lftdi -lm
-xsvftool-ft232r.o: CFLAGS+=-lftdi
+xsvftool-ft232r: LDLIBS+=-lftdi1 -lm
+xsvftool-ft232r.o: CFLAGS+=-lftdi1
 xsvftool-ft232r: libxsvf.a xsvftool-ft232r.o
 
-xsvftool-ft232r2: LDLIBS+=-lftdi -lm
-xsvftool-ft232r2.o: CFLAGS+=-lftdi
+xsvftool-ft232r2: LDLIBS+=-lftdi1 -lm
+xsvftool-ft232r2.o: CFLAGS+=-lftdi1
 xsvftool-ft232r2: libxsvf.a xsvftool-ft232r2.o
 
-xsvftool-ft230x: LDLIBS+=-lftdi -lm
-xsvftool-ft230x.o: CFLAGS+=-lftdi
+xsvftool-ft230x: LDLIBS+=-lftdi1 -lm
+xsvftool-ft230x.o: CFLAGS+=-lftdi1
 xsvftool-ft230x: libxsvf.a xsvftool-ft230x.o
 
 xsvftool-xpcu: libxsvf.a xsvftool-xpcu.src/*.c xsvftool-xpcu.src/*.h \
