@@ -2,7 +2,13 @@
 
 This is attempt to use bitbang mode of FT232R, FT230X, FT231X and similar
 with forked lib(x)svf. Source is for linux. Currently it detects chip ID but
-doesn't work for real SVF files (TDO mismatch error).
+doesn't work for real SVF files with this error:
+
+    Error while playing SVF file `/tmp/project_project_sram.svf'.
+    Total number of clock cycles: 1973384
+    Number of significant TDI bits: 1955572
+    Number of significant TDO bits: 563
+    Finished with errors!
 
 # Original README:
 
