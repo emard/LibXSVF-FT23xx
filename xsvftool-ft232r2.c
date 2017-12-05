@@ -73,11 +73,11 @@
 
 // The clock rate for bitbang is 16 times baudrate.
 // It takes about 6 clock cycles for a read/write cycle.
-#define BAUDRATE 9600
+#define BAUDRATE 62500
 
 // The latency timer is how long the timer is to flush
 // data in buffer into USB bus. The minimum number is 2ms.
-#define LATENCY 2
+#define LATENCY 1
 
 // For simplicity, these variables are put here as static variables.
 static unsigned char bb_reg = 0;
