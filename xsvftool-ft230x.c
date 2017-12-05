@@ -32,28 +32,29 @@
 /** BEGIN: Low-Level I/O Implementation **/
 struct ftdi_context ftdic;
 
-#if 0
-#define USB_TMS                 0x80  // 7
-#define USB_TDO                 0x40  // 6
-#define USB_TCK                 0x20  // 5
-#define USB_TDI                 0x08  // 3
-#endif
-
-struct io_layout
+struct i_layout
 {
-        uint8_t unused012:3; // bits 0,1,2 unused
-	uint8_t tdi:1; // bit 3, 0x08
-        uint8_t unused4:1; // bit 4 unused, 0x10
-	uint8_t tck:1; // bit 5, 0x20
-	uint8_t tdo:1; // bit 6, 0x40
-	uint8_t tms:1; // bit 7, 0x80
+	uint8_t tdi:1; // bit 0, 0x01
+	uint8_t tms:1; // bit 1, 0x02
+	uint8_t tdo:1; // bit 2, 0x04
+	uint8_t tck:1; // bit 3, 0x08
+        uint8_t unused:4; // bits 4,5,6,7 unused
 };
 
-static volatile struct io_layout *o_direction;
-static volatile struct io_layout *o_data;
-static volatile struct io_layout *i_data;
+struct o_layout
+{
+        uint8_t unused:4; // bits 0,1,2,3 unused
+	uint8_t tdi:1; // bit 4, 0x10
+	uint8_t tms:1; // bit 5, 0x20
+	uint8_t tdo:1; // bit 6, 0x40
+	uint8_t tck:1; // bit 7, 0x80
+};
 
-#define BUFLEN_MAX 3
+static volatile struct o_layout *o_direction;
+static volatile struct o_layout *o_data;
+static volatile struct i_layout *i_data;
+
+#define BUFLEN_MAX 384
 
 static void io_setup(void)
 {
@@ -61,38 +62,29 @@ static void io_setup(void)
   ftdi_init(&ftdic);
 
   /* Open FTDI device based on FT232R vendor & product IDs */
-  if(ftdi_usb_open(&ftdic, 0x0403, 0x6001) < 0)
+  if(ftdi_usb_open(&ftdic, 0x0403, 0x6015) < 0)
   {
     puts("Can't open device");
     return;
   }
 
-  o_direction = (struct io_layout *)malloc(sizeof(struct io_layout));
-  o_data = (struct io_layout *)malloc(BUFLEN_MAX * sizeof(struct io_layout));
-  i_data = (struct io_layout *)malloc(BUFLEN_MAX * sizeof(struct io_layout));
+  o_direction = (struct o_layout *)malloc(sizeof(struct o_layout));
+  o_data = (struct o_layout *)malloc(BUFLEN_MAX * sizeof(struct o_layout));
+  i_data = (struct i_layout *)malloc(BUFLEN_MAX * sizeof(struct i_layout));
 
   /* set direction reg */
-  o_direction->unused012 = 0;
-  o_direction->unused4 = 0;
+  o_direction->unused = 0;
   o_direction->tms = 1;
   o_direction->tck = 1;
   o_direction->tdo = 0; // input
   o_direction->tdi = 1;
 
-  ftdi_set_baudrate(&ftdic, 62500); /* 1MBIT Actually n * 16 */
+  ftdi_set_baudrate(&ftdic, 15000); /* Actually n * 16 */
 
   ftdi_write_data_set_chunksize(&ftdic, BUFLEN_MAX);
   ftdi_set_latency_timer(&ftdic, 1);
 
   /* Initialize, open device, set bitbang mode w/5 outputs */
-  o_data->unused012 = 0;
-  o_data->unused4 = 0;
-  o_data->tms = 0;
-  o_data->tck = 0;
-  o_data->tdo = 0;
-  o_data->tdi = 0;
-  ftdi_set_bitmode(&ftdic, *(unsigned char *)o_data, BITMODE_SYNCBB);
-  usleep(100000);
   // ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_BITBANG);
   ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_SYNCBB);
 
@@ -123,31 +115,22 @@ static void io_tdi(int val)
 static void io_tck(int val)
 {
 	o_data->tck = val;
-	// synchronous bitbang first reads then sends it means that
-	// read is 1 byte behind the write. so to
-	// read result of last write, we send the same byte twice
-	#if 0
-	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
+	#if 1
 	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
 	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 	#else
-	if(val == 1)
+	if(val != 0)
 	{
-	  // after tck=0 we don't read state.
-	  // between tck=0 and tck=1 the output state
-	  // of other pins doesn't change, so we can
-	  // discard reading after tck=1 and only read
-          // state after tck=1
-	  static unsigned char out_buf[3], in_buf[3];
+	  unsigned char out_buf[2], in_buf[2];
 	  o_data->tck = 0;
 	  out_buf[0] = *((unsigned char *)(o_data));
 	  o_data->tck = 1;
 	  out_buf[1] = *((unsigned char *)(o_data));
-	  out_buf[2] = *((unsigned char *)(o_data));
-	  ftdi_write_data(&ftdic, out_buf, 3);
-	  ftdi_read_data(&ftdic, in_buf, 3);
-	  *i_data = ((struct io_layout *)in_buf)[2];
+	  ftdi_write_data(&ftdic, out_buf, 2);
+	  //ftdi_read_data(&ftdic, in_buf, 2);
+	  //*i_data = *((struct io_layout *)in_buf);
+          ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
+	  ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 	}
 	#endif
 }
@@ -227,7 +210,7 @@ static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 			fflush(stderr);
 		}
 	}
-	#if 0
+	#if 1
 	if (usecs > 0) {
 		usleep(usecs);
 	}

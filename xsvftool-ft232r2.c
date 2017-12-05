@@ -1,6 +1,7 @@
 /*
- *  Lib(X)SVF  -  A library for implementing SVF and XSVF JTAG players
- *
+ *  XSVF_BANG - A software for bitbanging XSVF to JTAG through FTDI 2xx
+ * 
+ *  Copyright (C) 2014  Adam Li <adamli@hyervision.com>
  *  Copyright (C) 2009  RIEGL Research ForschungsGmbH
  *  Copyright (C) 2009  Clifford Wolf <clifford@clifford.at>
  *  
@@ -18,7 +19,33 @@
  *
  */
 
+/*
+ *  This code is modified based on xsvftool-gpio.c from Lib(X)SVF.
+ *  A typical computer does not have GPIO. In order to send bits in and
+ *  out, a FTDI 2xx chip is used at its bitbang mode as specified in
+ *  FTDI application notes AN_232R-01. For simplicity, synchronous 
+ *  bitbang mode is used.
+ * 
+ *  The bitbang bits are mapped as following on FT232RL/FT245RL chips:
+ * 
+ *  	Bit 0:		Pin  1		TXD
+ *  	Bit 1:		Pin  5		RXD
+ *  	Bit 2:		Pin  3		RTS
+ *  	Bit 3:		Pin 11		CTS
+ *  	Bit 4:		Pin  2		DTR
+ *  	Bit 5:		Pin  9		DSR
+ *  	Bit 6:		Pin 10		DCD
+ *  	Bit 7:		Pin  6		RI
+ */
+
+#define LINUX 1
+#define WINDOWS 0
+
 #include "libxsvf.h"
+#if WINDOWS
+#include "ftd2xx.h"
+#endif
+
 
 #include <sys/time.h>
 #include <unistd.h>
@@ -26,147 +53,182 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <errno.h>
-#include <ftdi.h>
+#if LINUX
 #include <stdint.h>
-
-/** BEGIN: Low-Level I/O Implementation **/
-struct ftdi_context ftdic;
-
-#if 0
-#define USB_TMS                 0x80  // 7
-#define USB_TDO                 0x40  // 6
-#define USB_TCK                 0x20  // 5
-#define USB_TDI                 0x08  // 3
+#include <ftdi.h>
 #endif
 
-struct io_layout
+/** BEGIN: Low-Level I/O BitBang (bb) Implementation **/
+#define DWORD uint32_t
+
+// Define the pins used.
+#define MASK_TMS (1<<7)	// Bit5, DSR, Output
+#define MASK_TDI (1<<3)	// Bit0, TXD, Output
+#define MASK_TDO (1<<6)	// Bit1, RXD, Input
+#define MASK_TCK (1<<5)	// Bit6, DCD, Output
+
+// Pin direction mask, 0 for input and 1 for output.
+// TMS, TDI, and TCK are output pins. All others are input pins.
+#define MASK_IO (MASK_TMS | MASK_TDI | MASK_TCK)
+
+// The clock rate for bitbang is 16 times baudrate.
+// It takes about 6 clock cycles for a read/write cycle.
+#define BAUDRATE 9600
+
+// The latency timer is how long the timer is to flush
+// data in buffer into USB bus. The minimum number is 2ms.
+#define LATENCY 2
+
+// For simplicity, these variables are put here as static variables.
+static unsigned char bb_reg = 0;
+// static FT_HANDLE bb_handle = NULL;
+struct ftdi_context bb_handle;
+
+static void bb_setup(void)
 {
-        uint8_t unused012:3; // bits 0,1,2 unused
-	uint8_t tdi:1; // bit 3, 0x08
-        uint8_t unused4:1; // bit 4 unused, 0x10
-	uint8_t tck:1; // bit 5, 0x20
-	uint8_t tdo:1; // bit 6, 0x40
-	uint8_t tms:1; // bit 7, 0x80
-};
+	DWORD nDevs;
 
-static volatile struct io_layout *o_direction;
-static volatile struct io_layout *o_data;
-static volatile struct io_layout *i_data;
-
-#define BUFLEN_MAX 3
-
-static void io_setup(void)
-{
-  /* Initialize context for subsequent function calls */
-  ftdi_init(&ftdic);
-
-  /* Open FTDI device based on FT232R vendor & product IDs */
-  if(ftdi_usb_open(&ftdic, 0x0403, 0x6001) < 0)
-  {
-    puts("Can't open device");
-    return;
-  }
-
-  o_direction = (struct io_layout *)malloc(sizeof(struct io_layout));
-  o_data = (struct io_layout *)malloc(BUFLEN_MAX * sizeof(struct io_layout));
-  i_data = (struct io_layout *)malloc(BUFLEN_MAX * sizeof(struct io_layout));
-
-  /* set direction reg */
-  o_direction->unused012 = 0;
-  o_direction->unused4 = 0;
-  o_direction->tms = 1;
-  o_direction->tck = 1;
-  o_direction->tdo = 0; // input
-  o_direction->tdi = 1;
-
-  ftdi_set_baudrate(&ftdic, 62500); /* 1MBIT Actually n * 16 */
-
-  ftdi_write_data_set_chunksize(&ftdic, BUFLEN_MAX);
-  ftdi_set_latency_timer(&ftdic, 1);
-
-  /* Initialize, open device, set bitbang mode w/5 outputs */
-  o_data->unused012 = 0;
-  o_data->unused4 = 0;
-  o_data->tms = 0;
-  o_data->tck = 0;
-  o_data->tdo = 0;
-  o_data->tdi = 0;
-  ftdi_set_bitmode(&ftdic, *(unsigned char *)o_data, BITMODE_SYNCBB);
-  usleep(100000);
-  // ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_BITBANG);
-  ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_SYNCBB);
-
-  // o_data = o_direction;
-  o_data->tms = 1;
-  o_data->tck = 1;
-  o_data->tdi = 1;
-  ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-  for(int i = 0; i < 4; i++)
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
-}
-
-static void io_shutdown(void)
-{
-}
-
-static void io_tms(int val)
-{
-	o_data->tms = val;
-}
-
-static void io_tdi(int val)
-{
-	o_data->tdi = val;
-}
-
-// buffer data during tck, don't execute
-static void io_tck(int val)
-{
-	o_data->tck = val;
-	// synchronous bitbang first reads then sends it means that
-	// read is 1 byte behind the write. so to
-	// read result of last write, we send the same byte twice
-	#if 0
-	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
-	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
-	#else
-	if(val == 1)
-	{
-	  // after tck=0 we don't read state.
-	  // between tck=0 and tck=1 the output state
-	  // of other pins doesn't change, so we can
-	  // discard reading after tck=1 and only read
-          // state after tck=1
-	  static unsigned char out_buf[3], in_buf[3];
-	  o_data->tck = 0;
-	  out_buf[0] = *((unsigned char *)(o_data));
-	  o_data->tck = 1;
-	  out_buf[1] = *((unsigned char *)(o_data));
-	  out_buf[2] = *((unsigned char *)(o_data));
-	  ftdi_write_data(&ftdic, out_buf, 3);
-	  ftdi_read_data(&ftdic, in_buf, 3);
-	  *i_data = ((struct io_layout *)in_buf)[2];
+        #if WINDOWS
+	// Check number of devices
+	if (FT_OK != FT_CreateDeviceInfoList(&nDevs)) {
+		fprintf(stderr, "FT_CreateDeviceInfoList error\n");
+	}
+	if (nDevs != 1) {
+		printf("%ld FTDI 2xx devices found. This first devices will be used.\n", nDevs);
 	}
 	#endif
+
+	// Open the port
+	#if WINDOWS
+	if (FT_OK != FT_Open(0, &bb_handle)) {
+		fprintf(stderr, "FT_Open error\n");
+	}
+	#endif
+	#if LINUX
+	ftdi_init(&bb_handle);
+
+	/* Open FTDI device based on FT232R vendor & product IDs */
+	if(ftdi_usb_open(&bb_handle, 0x0403, 0x6001) < 0)
+	{
+		puts("Can't open device");
+		return;
+    	}
+	#endif
+
+	// Set baudrate
+	#if WINDOWS
+	if (FT_OK != FT_SetBaudRate(bb_handle, BAUDRATE)) {
+		fprintf(stderr, "FT_SetBaudRate error\n");
+	}
+	#endif
+	#if LINUX
+	ftdi_set_baudrate(&bb_handle, BAUDRATE); /* Actually n * 16 */
+	#endif
+
+	
+	// Set latency timer
+	#if WINDOWS
+	if (FT_OK != FT_SetLatencyTimer(bb_handle, LATENCY)) {
+		fprintf(stderr, "FT_SetLatencyTimer error\n");
+	}
+	#endif
+	#if LINUX
+	ftdi_set_latency_timer(&bb_handle, LATENCY);
+	#endif
+	
+	// Set bitbang mode (Synchronous BitBang 0x4)
+	#if WINDOWS
+	if (FT_OK != FT_SetBitMode(bb_handle, MASK_IO, 0x4)) {
+		fprintf(stderr, "FT_SetBitMode error\n");
+	}
+	#endif
+	#if LINUX
+        ftdi_set_bitmode(&bb_handle, MASK_IO, 0x4);
+	#endif
+	
+	// Reset register
+	bb_reg = 0;
 }
 
-static void io_sck(int val)
+static void bb_shutdown(void)
 {
+	// Close the port
+	// if (bb_handle)
+	{
+		// FT_SetBitMode(bb_handle, 0, 0);	// Reset the module
+		ftdi_set_bitmode(&bb_handle, 0, 0);
+		// FT_Close(bb_handle);
+	}
+	// bb_handle = NULL;
 }
 
-static void io_trst(int val)
+static void bb_tms(int val)
 {
+	// Set TMS in BB register
+	if (val) bb_reg |= MASK_TMS;
+	else bb_reg &= ~MASK_TMS;
 }
 
-static int io_tdo()
+static void bb_tdi(int val)
 {
-	return i_data->tdo;
+	// Set tdi in BB register
+	if (val) bb_reg |= MASK_TDI;
+	else bb_reg &= ~MASK_TDI;
 }
 
-/** END: Low-Level I/O Implementation **/
+static int bb_pulse_tck()
+{
+	// Pulse TCK and return the TDO value
+	/* 
+	 *  In FT2xx bitbang mode, the read and write operations are performed
+	 *  in sequence. In other words, the lines are read first before the 
+	 *  write operation. So for each TCK pulse, three writes are performed.
+	 *  The first one is to set the output lines (TMS and TDI). The second
+	 *  is to pulse the TCK high, and the third one to pulse the TCK low.
+	 *  The third read bytes contains the TDO value after the raising edge
+	 *  of TCK (before before the falling edge of TCK). 
+	 */
 
+	unsigned char buf_out[3], buf_in[3];
+	DWORD lenWritten, lenRead;
+	DWORD lenRX, lenTX, devStatus;
+	
+	buf_out[0] = bb_reg & ~MASK_TCK;
+	buf_out[1] = bb_reg | MASK_TCK;
+	buf_out[2] = buf_out[0];
+	
+	// Check for the queue length to be zero
+	#if WINDOWS
+	if (FT_OK != FT_GetStatus(bb_handle, &lenRX, &lenTX, &devStatus)) {
+		fprintf(stderr, "FT_GetStatus error\n");
+	}
+	if (lenRX != 0 || lenTX != 0) {
+		fprintf(stderr, "FT device queue is not zero (%ld, %ld)\n", lenTX, lenRX);
+	}
+	#endif
+	
+	// Write and read
+	#if WINDOWS
+	if (FT_OK != FT_Write(bb_handle, buf_out, 3, &lenWritten)) {
+		fprintf(stderr, "FT_Write error\n");
+	}
+	if (FT_OK != FT_Read(bb_handle, buf_in, 3, &lenRead)) {
+		fprintf(stderr, "FT_Read error\n");
+	}
+	if (lenWritten != 3 || lenRead != 3) {
+		fprintf(stderr, "FT write read mismatch (%ld, %ld)\n", lenWritten, lenRead);
+	}
+	#endif
+	#if LINUX
+	ftdi_write_data(&bb_handle, buf_out, 3);
+	ftdi_read_data(&bb_handle, buf_in, 3);
+	#endif
+
+	// Return the TDO value after the pulse
+	return ((buf_in[2] & MASK_TDO) ? 1 : 0);
+}
+
+/** END: Low-Level I/O BitBang (bb) Implementation **/
 
 struct udata_s {
 	FILE *f;
@@ -185,7 +247,7 @@ static int h_setup(struct libxsvf_host *h)
 		fprintf(stderr, "[SETUP]\n");
 		fflush(stderr);
 	}
-	io_setup();
+	bb_setup();
 	return 0;
 }
 
@@ -196,7 +258,7 @@ static int h_shutdown(struct libxsvf_host *h)
 		fprintf(stderr, "[SHUTDOWN]\n");
 		fflush(stderr);
 	}
-	io_shutdown();
+	bb_shutdown();
 	return 0;
 }
 
@@ -210,10 +272,11 @@ static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 	if (num_tck > 0) {
 		struct timeval tv1, tv2;
 		gettimeofday(&tv1, NULL);
-		io_tms(tms);
+		bb_tms(tms);
 		while (num_tck > 0) {
-			io_tck(0);
-			io_tck(1);
+			//io_tck(0);
+			//io_tck(1);
+			bb_pulse_tck();
 			num_tck--;
 		}
 		gettimeofday(&tv2, NULL);
@@ -227,11 +290,9 @@ static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 			fflush(stderr);
 		}
 	}
-	#if 0
 	if (usecs > 0) {
 		usleep(usecs);
 	}
-	#endif
 }
 
 static int h_getbyte(struct libxsvf_host *h)
@@ -244,17 +305,17 @@ static int h_pulse_tck(struct libxsvf_host *h, int tms, int tdi, int tdo, int rm
 {
 	struct udata_s *u = h->user_data;
 
-	io_tms(tms);
+	bb_tms(tms);
 
 	if (tdi >= 0) {
 		u->bitcount_tdi++;
-		io_tdi(tdi);
+		bb_tdi(tdi);
 	}
 
-	io_tck(0);
-	io_tck(1);
-
-	int line_tdo = io_tdo();
+	//io_tck(0);
+	//io_tck(1);
+	//int line_tdo = io_tdo();
+	int line_tdo = bb_pulse_tck();
 	int rc = line_tdo >= 0 ? line_tdo : 0;
 
 	if (rmask == 1 && u->retval_i < 256)
@@ -266,8 +327,7 @@ static int h_pulse_tck(struct libxsvf_host *h, int tms, int tdi, int tdo, int rm
 			rc = -1;
 	}
 
-	if (u->verbose >= 4) 
-	{
+	if (u->verbose >= 4) {
 		fprintf(stderr, "[TMS:%d, TDI:%d, TDO_ARG:%d, TDO_LINE:%d, RMASK:%d, RC:%d]\n", tms, tdi, tdo, line_tdo, rmask, rc);
 	}
 
@@ -277,21 +337,27 @@ static int h_pulse_tck(struct libxsvf_host *h, int tms, int tdi, int tdo, int rm
 
 static void h_pulse_sck(struct libxsvf_host *h)
 {
+	fprintf(stderr, "WARNING: Pulsing SCK ignored!\n");
+	/*
 	struct udata_s *u = h->user_data;
 	if (u->verbose >= 4) {
 		fprintf(stderr, "[SCK]\n");
 	}
 	io_sck(0);
 	io_sck(1);
+	 */
 }
 
 static void h_set_trst(struct libxsvf_host *h, int v)
 {
+	fprintf(stderr, "WARNING: Setting TRST to %d ignored!\n", v);
+	/*
 	struct udata_s *u = h->user_data;
 	if (u->verbose >= 4) {
 		fprintf(stderr, "[TRST:%d]\n", v);
 	}
 	io_trst(v);
+	 */
 }
 
 static int h_set_frequency(struct libxsvf_host *h, int v)
@@ -367,10 +433,10 @@ static void copyleft()
 	static int already_printed = 0;
 	if (already_printed)
 		return;
-	fprintf(stderr, "xsvftool-gpio, part of Lib(X)SVF (http://www.clifford.at/libxsvf/).\n");
+	fprintf(stderr, "xsvf_bang, XSVF bitbanging JTAG through FTDI 2xx.\n");
+	fprintf(stderr, "Copyright (C) 2014  Adam Li <adamli@hyervision.com>\n");
 	fprintf(stderr, "Copyright (C) 2009  RIEGL Research ForschungsGmbH\n");
 	fprintf(stderr, "Copyright (C) 2009  Clifford Wolf <clifford@clifford.at>\n");
-	fprintf(stderr, "Lib(X)SVF is free software licensed under the ISC license.\n");
 	already_printed = 1;
 }
 
@@ -409,7 +475,7 @@ int main(int argc, char **argv)
 	const char *realloc_name = NULL;
 	int opt, i, j;
 
-	progname = argc >= 1 ? argv[0] : "xvsftool";
+	progname = argc >= 1 ? argv[0] : "xvsf_bang";
 	while ((opt = getopt(argc, argv, "r:vLBx:s:c")) != -1)
 	{
 		switch (opt)
