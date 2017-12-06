@@ -32,13 +32,10 @@
 /** BEGIN: Low-Level I/O Implementation **/
 struct ftdi_context ftdic;
 
-#if 0
-#define USB_TMS                 0x80  // 7
-#define USB_TDO                 0x40  // 6
-#define USB_TCK                 0x20  // 5
-#define USB_TDI                 0x08  // 3
-#endif
+#define ULX2S 1
+#define FT232R_MODULE 0
 
+#if ULX2S
 struct io_layout
 {
         uint8_t unused012:3; // bits 0,1,2 unused
@@ -48,6 +45,31 @@ struct io_layout
 	uint8_t tdo:1; // bit 6, 0x40
 	uint8_t tms:1; // bit 7, 0x80
 };
+#endif
+
+#if FT232R_MODULE
+/*
+#define PIN_TX  0x01
+#define PIX_RX  0x02
+#define PIN_RTS 0x04
+#define PIN_CTS 0x08
+#define PIN_DTR 0x10
+#define PIN_DSR 0x20
+#define PIN_DCD 0x40
+#define PIN_RI  0x80
+*/
+struct io_layout
+{
+	uint8_t tck:1; // TXD bit 0, 0x01
+	uint8_t tdo:1; // RXD bit 1, 0x02
+        uint8_t unused4:1; // bit ? unused
+	uint8_t tms:1; // CTS bit 3, 0x08
+	uint8_t tdi:1; // DTR bit 4, 0x10
+        uint8_t unused012:3; // bits ? unused
+};
+#endif
+
+
 
 static volatile struct io_layout *o_direction;
 static volatile struct io_layout *o_data;
@@ -79,7 +101,9 @@ static void io_setup(void)
   o_direction->tdo = 0; // input
   o_direction->tdi = 1;
 
-  ftdi_set_baudrate(&ftdic, 62500); /* 1MBIT Actually n * 16 */
+  // ftdi_set_baudrate(&ftdic, 62500); /* 1MBIT Actually n * 16 */
+  // ftdi_set_baudrate(&ftdic, 9600); /* 1MBIT Actually n * 16 */
+  ftdi_set_baudrate(&ftdic, 15000); /* 1MBIT Actually n * 16 */
 
   ftdi_write_data_set_chunksize(&ftdic, BUFLEN_MAX);
   ftdi_set_latency_timer(&ftdic, 1);
@@ -87,12 +111,14 @@ static void io_setup(void)
   /* Initialize, open device, set bitbang mode w/5 outputs */
   o_data->unused012 = 0;
   o_data->unused4 = 0;
+  #if 0
   o_data->tms = 0;
   o_data->tck = 0;
   o_data->tdo = 0;
   o_data->tdi = 0;
   ftdi_set_bitmode(&ftdic, *(unsigned char *)o_data, BITMODE_SYNCBB);
   usleep(100000);
+  #endif
   // ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_BITBANG);
   ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_SYNCBB);
 
@@ -227,7 +253,7 @@ static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 			fflush(stderr);
 		}
 	}
-	#if 0
+	#if 1
 	if (usecs > 0) {
 		usleep(usecs);
 	}
@@ -268,7 +294,8 @@ static int h_pulse_tck(struct libxsvf_host *h, int tms, int tdi, int tdo, int rm
 
 	if (u->verbose >= 4) 
 	{
-		fprintf(stderr, "[TMS:%d, TDI:%d, TDO_ARG:%d, TDO_LINE:%d, RMASK:%d, RC:%d]\n", tms, tdi, tdo, line_tdo, rmask, rc);
+		fprintf(stderr, "[TMS:%d, TDI:%d, TDO_ARG:%d, TDO_LINE:%d, RMASK:%d, RC:%d]\n",
+			tms, tdi, tdo, line_tdo, rmask, rc);
 	}
 
 	u->clockcount++;
