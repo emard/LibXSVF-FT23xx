@@ -32,8 +32,8 @@
 /** BEGIN: Low-Level I/O Implementation **/
 struct ftdi_context ftdic;
 
-#define ULX2S 1
-#define FT232R_MODULE 0
+#define ULX2S 0
+#define FT232R_MODULE 1
 
 #if ULX2S
 struct io_layout
@@ -52,7 +52,7 @@ struct io_layout
 #define PIN_TX  0x01
 #define PIX_RX  0x02
 #define PIN_RTS 0x04
-#define PIN_CTS 0x08
+#define PIN_CTS 0x08 // low drive current, avoid being output
 #define PIN_DTR 0x10
 #define PIN_DSR 0x20
 #define PIN_DCD 0x40
@@ -60,11 +60,11 @@ struct io_layout
 */
 struct io_layout
 {
-	uint8_t tck:1; // TXD bit 0, 0x01
+	uint8_t tdi:1; // TXD bit 0, 0x01
 	uint8_t tdo:1; // RXD bit 1, 0x02
         uint8_t unused4:1; // bit ? unused
-	uint8_t tms:1; // CTS bit 3, 0x08
-	uint8_t tdi:1; // DTR bit 4, 0x10
+	uint8_t tck:1; // CTS bit 3, 0x08
+	uint8_t tms:1; // DTR bit 4, 0x10
         uint8_t unused012:3; // bits ? unused
 };
 #endif
@@ -101,9 +101,7 @@ static void io_setup(void)
   o_direction->tdo = 0; // input
   o_direction->tdi = 1;
 
-  // ftdi_set_baudrate(&ftdic, 62500); /* 1MBIT Actually n * 16 */
-  // ftdi_set_baudrate(&ftdic, 9600); /* 1MBIT Actually n * 16 */
-  ftdi_set_baudrate(&ftdic, 15000); /* 1MBIT Actually n * 16 */
+  ftdi_set_baudrate(&ftdic, 57600); /* 921600 Actually n * 16 */
 
   ftdi_write_data_set_chunksize(&ftdic, BUFLEN_MAX);
   ftdi_set_latency_timer(&ftdic, 1);
@@ -111,6 +109,7 @@ static void io_setup(void)
   /* Initialize, open device, set bitbang mode w/5 outputs */
   o_data->unused012 = 0;
   o_data->unused4 = 0;
+
   #if 0
   o_data->tms = 0;
   o_data->tck = 0;
@@ -119,15 +118,18 @@ static void io_setup(void)
   ftdi_set_bitmode(&ftdic, *(unsigned char *)o_data, BITMODE_SYNCBB);
   usleep(100000);
   #endif
-  // ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_BITBANG);
-  ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_SYNCBB);
 
-  // o_data = o_direction;
-  o_data->tms = 1;
-  o_data->tck = 1;
-  o_data->tdi = 1;
+  // Sync mode "BITMODE_SYNCBB" is slow but safe
+  // slow is because very write must be accompanied by read
+  ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_SYNCBB);
+  // after sync mode works, it's possible to accelerate by temprary
+  // switching into asynchronus "BITMODE_BITBANG" and back for the parts of
+  // protocol in which bits are only written without reading after each wriiten state.
+  // ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_BITBANG);
+
+  o_data->tms = o_data->tck = o_data->tdi = 0;
   ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-  for(int i = 0; i < 10; i++)
+  for(int i = 0; i < 200; i++)
 	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 }
 
@@ -158,19 +160,23 @@ static void io_tck(int val)
 	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
 	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
 	#else
-	if(val == 1)
+	if(val > 0)
 	{
 	  // after tck=0 we don't read state.
 	  // between tck=0 and tck=1 the output state
 	  // of other pins doesn't change, so we can
 	  // discard reading after tck=1 and only read
           // state after tck=1
-	  static unsigned char out_buf[3], in_buf[3];
+	  static unsigned char out_buf[4], in_buf[4];
 	  o_data->tck = 0;
 	  out_buf[0] = *((unsigned char *)(o_data));
 	  o_data->tck = 1;
 	  out_buf[1] = *((unsigned char *)(o_data));
 	  out_buf[2] = *((unsigned char *)(o_data));
+          #if 0
+	  o_data->tck = 1;
+	  out_buf[3] = *((unsigned char *)(o_data));
+	  #endif
 	  ftdi_write_data(&ftdic, out_buf, 3);
 	  ftdi_read_data(&ftdic, in_buf, 3);
 	  *i_data = ((struct io_layout *)in_buf)[2];
