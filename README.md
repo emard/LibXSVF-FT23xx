@@ -1,8 +1,14 @@
 # LibXSVF-ft23xx
 
 This is attempt to use bitbang mode of FT232R, FT230X, FT231X and similar
-with forked lib(x)svf. Source is for linux. Currently it detects chip ID but
-doesn't work for real SVF files with this error:
+with forked lib(x)svf. Source is for linux. 
+
+Xilinx Spartan-6: libxsvf-ft232r.c (#define FT232R_MODULE 1)
+Slow but works. 1.4MB SVF file created with XISE uploaded in 25 minutes.
+
+Lattice FX2: libxsvf-ft232r.c (#define ULX2S 1)
+Currently it detects chip ID but doesn't work for real SVF.
+2.4MB SVF file created with diamond after 17 minutes reports this error: 
 
     Error while playing SVF file `/tmp/project_project_sram.svf'.
     Total number of clock cycles: 1973384
