@@ -90,6 +90,10 @@ xsvftool-ft230x: LDLIBS+=-lftdi1 -lm
 xsvftool-ft230x.o: CFLAGS+=-lftdi1
 xsvftool-ft230x: libxsvf.a xsvftool-ft230x.o
 
+xsvftool-ft231x: LDLIBS+=-lftdi1 -lm
+xsvftool-ft231x.o: CFLAGS+=-lftdi1
+xsvftool-ft231x: libxsvf.a xsvftool-ft231x.o
+
 xsvftool-xpcu: libxsvf.a xsvftool-xpcu.src/*.c xsvftool-xpcu.src/*.h \
 		xsvftool-xpcu.src/*.v xsvftool-xpcu.src/*.ucf
 	$(MAKE) -C xsvftool-xpcu.src
