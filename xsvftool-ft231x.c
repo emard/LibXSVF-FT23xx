@@ -80,7 +80,7 @@ static void io_setup(void)
   o_direction->tdo = 0; // input
   o_direction->tdi = 1;
 
-  ftdi_set_baudrate(&ftdic, 62500); /* 1MBIT Actually n * 16 */
+  ftdi_set_baudrate(&ftdic, 57600); /* 921600 bps Actually n * 16 */
 
   ftdi_write_data_set_chunksize(&ftdic, BUFLEN_MAX);
   ftdi_set_latency_timer(&ftdic, 1);
@@ -368,7 +368,7 @@ static void copyleft()
 	static int already_printed = 0;
 	if (already_printed)
 		return;
-	fprintf(stderr, "xsvftool-gpio, part of Lib(X)SVF (http://www.clifford.at/libxsvf/).\n");
+	fprintf(stderr, "xsvftool-ft231x, additional to Lib(X)SVF (http://www.clifford.at/libxsvf/).\n");
 	fprintf(stderr, "Copyright (C) 2009  RIEGL Research ForschungsGmbH\n");
 	fprintf(stderr, "Copyright (C) 2009  Clifford Wolf <clifford@clifford.at>\n");
 	fprintf(stderr, "Lib(X)SVF is free software licensed under the ISC license.\n");
