@@ -62,7 +62,7 @@ static void io_setup(void)
   ftdi_init(&ftdic);
 
   /* Open FTDI device based on FT231X vendor & product IDs */
-  if(ftdi_usb_open(&ftdic, 0x0403, 0x6016) < 0)
+  if(ftdi_usb_open(&ftdic, 0x0403, 0x6015) < 0)
   {
     puts("Can't open device");
     return;
