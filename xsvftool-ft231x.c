@@ -80,9 +80,11 @@ static void io_setup(void)
   o_direction->tdo = 0; // input
   o_direction->tdi = 1;
 
-  ftdi_set_baudrate(&ftdic, 57600); /* 921600 bps Actually n * 16 */
+  // ftdi_set_baudrate(&ftdic, 57600); /* 921600 bps Actually n * 16 */
+  ftdi_set_baudrate(&ftdic, 1200); /* 921600 bps Actually n * 16 */
 
   ftdi_write_data_set_chunksize(&ftdic, BUFLEN_MAX);
+  // ftdi_read_data_set_chunksize(&ftdic, BUFLEN_MAX+2);
   ftdi_set_latency_timer(&ftdic, 1);
 
   /* Initialize, open device, set bitbang mode w/5 outputs */
@@ -92,8 +94,6 @@ static void io_setup(void)
   o_data->tck = 0;
   o_data->tdo = 0;
   o_data->tdi = 0;
-  ftdi_set_bitmode(&ftdic, *(unsigned char *)o_data, BITMODE_SYNCBB);
-  usleep(100000);
   // ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_BITBANG);
   ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_SYNCBB);
 
@@ -102,8 +102,8 @@ static void io_setup(void)
   o_data->tck = 1;
   o_data->tdi = 1;
   ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-  for(int i = 0; i < 10; i++)
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
+  ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
+  ftdi_usb_purge_buffers(&ftdic);
 }
 
 static void io_shutdown(void)
