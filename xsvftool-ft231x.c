@@ -54,7 +54,7 @@ static volatile struct io_layout *o_direction;
 static volatile struct io_layout *o_data;
 static volatile struct io_layout *i_data;
 
-#define BUFLEN_MAX 3
+#define BUFLEN_MAX (65536/3)
 
 static void io_setup(void)
 {
@@ -80,12 +80,12 @@ static void io_setup(void)
   o_direction->tdo = 0; // input
   o_direction->tdi = 1;
 
-  // ftdi_set_baudrate(&ftdic, 57600); /* 921600 bps Actually n * 16 */
-  ftdi_set_baudrate(&ftdic, 1200); /* 921600 bps Actually n * 16 */
+  // ftdi_set_baudrate(&ftdic, (921600/4));
+  ftdi_set_baudrate(&ftdic, (921600/4));
 
   ftdi_write_data_set_chunksize(&ftdic, BUFLEN_MAX);
   // ftdi_read_data_set_chunksize(&ftdic, BUFLEN_MAX+2);
-  ftdi_set_latency_timer(&ftdic, 1);
+  // ftdi_set_latency_timer(&ftdic, 1);
 
   /* Initialize, open device, set bitbang mode w/5 outputs */
   o_data->unused012 = 0;
@@ -94,16 +94,14 @@ static void io_setup(void)
   o_data->tck = 0;
   o_data->tdo = 0;
   o_data->tdi = 0;
-  // ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_BITBANG);
-  ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_SYNCBB);
+  ftdi_set_bitmode(&ftdic, *(unsigned char *)o_direction, BITMODE_BITBANG);
 
-  // o_data = o_direction;
-  o_data->tms = 1;
-  o_data->tck = 1;
-  o_data->tdi = 1;
+  o_data->tms = 0;
+  o_data->tck = 0;
+  o_data->tdi = 0;
   ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-  ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
-  ftdi_usb_purge_buffers(&ftdic);
+  //ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
+  //ftdi_usb_purge_buffers(&ftdic);
 }
 
 static void io_shutdown(void)
@@ -124,15 +122,6 @@ static void io_tdi(int val)
 static void io_tck(int val)
 {
 	o_data->tck = val;
-	// synchronous bitbang first reads then sends it means that
-	// read is 1 byte behind the write. so to
-	// read result of last write, we send the same byte twice
-	#if 0
-	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
-	ftdi_write_data(&ftdic, (unsigned char *)o_data, 1);
-	ftdi_read_data(&ftdic, (unsigned char *)i_data, 1);
-	#else
 	if(val == 1)
 	{
 	  // after tck=0 we don't read state.
@@ -140,17 +129,13 @@ static void io_tck(int val)
 	  // of other pins doesn't change, so we can
 	  // discard reading after tck=1 and only read
           // state after tck=1
-	  static unsigned char out_buf[3], in_buf[3];
+          static unsigned char out_buf[2];
 	  o_data->tck = 0;
 	  out_buf[0] = *((unsigned char *)(o_data));
 	  o_data->tck = 1;
 	  out_buf[1] = *((unsigned char *)(o_data));
-	  out_buf[2] = *((unsigned char *)(o_data));
-	  ftdi_write_data(&ftdic, out_buf, 3);
-	  ftdi_read_data(&ftdic, in_buf, 3);
-	  *i_data = ((struct io_layout *)in_buf)[2];
+	  ftdi_write_data(&ftdic, out_buf, 2);
 	}
-	#endif
 }
 
 static void io_sck(int val)
@@ -163,6 +148,7 @@ static void io_trst(int val)
 
 static int io_tdo()
 {
+        ftdi_read_pins(&ftdic, (unsigned char *)i_data);
 	return i_data->tdo;
 }
 
@@ -228,11 +214,9 @@ static void h_udelay(struct libxsvf_host *h, long usecs, int tms, long num_tck)
 			fflush(stderr);
 		}
 	}
-	#if 0
 	if (usecs > 0) {
 		usleep(usecs);
 	}
-	#endif
 }
 
 static int h_getbyte(struct libxsvf_host *h)
